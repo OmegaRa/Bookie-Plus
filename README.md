@@ -58,6 +58,8 @@ services:
   bookie-plus:
     container_name: bookie-plus
     image: ghcr.io/OmegaRa/bookie-plus:latest
+    labels:
+        icon: https://github.com/OmegaRa/Bookie-Plus/blob/main/temp_icon.png?raw=true
     ports:
       - "5000:5000"
     volumes:

@@ -560,12 +560,10 @@ def create_app():
     app.config["SESSION_COOKIE_HTTPONLY"] = True
     app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
     _secure_env = os.environ.get("SESSION_COOKIE_SECURE", "").lower()
-    if _secure_env in ("0", "false", "no"):
-        app.config["SESSION_COOKIE_SECURE"] = False
-    elif _secure_env in ("1", "true", "yes"):
+    if _secure_env in ("1", "true", "yes"):
         app.config["SESSION_COOKIE_SECURE"] = True
     else:
-        app.config["SESSION_COOKIE_SECURE"] = not app.debug
+        app.config["SESSION_COOKIE_SECURE"] = False
 
     db.init_app(app)
 
@@ -1064,6 +1062,74 @@ def create_app():
         )
         db.session.commit()
         return jsonify({"removed": removed})
+
+    @app.route("/api/books/bulk-tags-summary", methods=["POST"])
+    @login_required
+    def bulk_tags_summary():
+        data = request.get_json(silent=True) or {}
+        ids = data.get("ids", [])
+        if not ids:
+            return jsonify({"total_books": 0, "tags": []})
+        results = (
+            db.session.query(Tag.id, Tag.name, db.func.count(BookTag.book_id))
+            .join(BookTag, Tag.id == BookTag.tag_id)
+            .filter(BookTag.book_id.in_(ids))
+            .group_by(Tag.id, Tag.name)
+            .order_by(Tag.name.asc())
+            .all()
+        )
+        return jsonify({
+            "total_books": len(ids),
+            "tags": [{"id": r[0], "name": r[1], "count": r[2]} for r in results],
+        })
+
+    @app.route("/api/books/bulk-update-tags", methods=["POST"])
+    @login_required
+    def bulk_update_tags():
+        data = request.get_json(silent=True) or {}
+        ids = data.get("ids", [])
+        if not ids:
+            return jsonify({"error": "ids required"}), 400
+
+        add_tags = [t.strip() for t in data.get("add", []) if isinstance(t, str) and t.strip()]
+        remove_tags = [t.strip() for t in data.get("remove", []) if isinstance(t, str) and t.strip()]
+        replace = data.get("replace") or {}
+
+        if replace and replace.get("old_tag") and replace.get("new_tag"):
+            old_name = replace["old_tag"].strip()
+            new_name = replace["new_tag"].strip()
+            if old_name and new_name and old_name != new_name:
+                remove_tags.append(old_name)
+                add_tags.append(new_name)
+
+        if remove_tags:
+            tags_to_remove = Tag.query.filter(Tag.name.in_(remove_tags)).all()
+            if tags_to_remove:
+                tag_ids = [t.id for t in tags_to_remove]
+                BookTag.query.filter(
+                    BookTag.book_id.in_(ids),
+                    BookTag.tag_id.in_(tag_ids),
+                ).delete(synchronize_session=False)
+
+        if add_tags:
+            for name in set(add_tags):
+                tag = Tag.query.filter_by(name=name).first()
+                if not tag:
+                    tag = Tag(name=name)
+                    db.session.add(tag)
+                    db.session.flush()
+
+                existing = {
+                    r[0] for r in db.session.query(BookTag.book_id)
+                    .filter(BookTag.book_id.in_(ids), BookTag.tag_id == tag.id)
+                    .all()
+                }
+                for book_id in ids:
+                    if book_id not in existing:
+                        db.session.add(BookTag(book_id=book_id, tag_id=tag.id))
+
+        db.session.commit()
+        return jsonify({"success": True, "updated": len(ids)})
 
     @app.route("/api/books/<int:book_id>/download", methods=["GET"])
     @login_required

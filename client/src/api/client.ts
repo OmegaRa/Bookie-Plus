@@ -25,7 +25,7 @@ async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
     },
   })
 
-  if (response.status === 401) {
+  if (response.status === 401 && path !== '/api/auth/login') {
     // Force a full page reload so the server can redirect to the login page
     window.location.reload()
     // Return a promise that never resolves so callers don't proceed with stale state
@@ -122,6 +122,32 @@ export function bulkRemoveTag(ids: number[], tag: string): Promise<{ removed: nu
   return api<{ removed: number }>('/api/books/bulk-untag', {
     method: 'POST',
     body: JSON.stringify({ ids, tag }),
+  })
+}
+
+export interface BulkTagsSummaryResponse {
+  total_books: number
+  tags: { id: number; name: string; count: number }[]
+}
+
+export function bulkTagsSummary(ids: number[]): Promise<BulkTagsSummaryResponse> {
+  return api<BulkTagsSummaryResponse>('/api/books/bulk-tags-summary', {
+    method: 'POST',
+    body: JSON.stringify({ ids }),
+  })
+}
+
+export interface BulkUpdateTagsPayload {
+  ids: number[]
+  add?: string[]
+  remove?: string[]
+  replace?: { old_tag: string; new_tag: string }
+}
+
+export function bulkUpdateTags(payload: BulkUpdateTagsPayload): Promise<{ success: boolean; updated: number }> {
+  return api<{ success: boolean; updated: number }>('/api/books/bulk-update-tags', {
+    method: 'POST',
+    body: JSON.stringify(payload),
   })
 }
 
@@ -480,6 +506,8 @@ export default {
   bulkDeleteBooks,
   bulkAddTag,
   bulkRemoveTag,
+  bulkTagsSummary,
+  bulkUpdateTags,
   // Tags
   getTags,
   getBookTags,

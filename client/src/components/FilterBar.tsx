@@ -1,10 +1,11 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Grid2x2, List, SlidersHorizontal, ChevronDown, X, Trash2 } from 'lucide-react'
+import { Grid2x2, List, SlidersHorizontal, ChevronDown, X, Trash2, Tag as TagIcon, CheckSquare } from 'lucide-react'
 import { useStore } from '../store'
 import * as api from '../api/client'
 import { Tag } from '../types'
 import SearchBar from './SearchBar'
+import BulkTagDialog from './BulkTagDialog'
 
 const FORMAT_OPTIONS = [
   { value: '', label: 'All Formats' },
@@ -71,9 +72,7 @@ export default function FilterBar() {
   // 'filters' | 'views' | null — only one panel open at a time on mobile
   const [mobilePanel, setMobilePanel] = useState<'filters' | 'views' | null>(null)
   const [deleting, setDeleting] = useState(false)
-  const [tagging, setTagging] = useState(false)
-  const [clearingTags, setClearingTags] = useState(false)
-  const [selectionHasTaggedBooks, setSelectionHasTaggedBooks] = useState(false)
+  const [manageTagsOpen, setManageTagsOpen] = useState(false)
   const [fetchingMeta, setFetchingMeta] = useState(false)
   const [fetchMetaProgress, setFetchMetaProgress] = useState<{ done: number; total: number } | null>(null)
   const qc = useQueryClient()
@@ -111,23 +110,6 @@ export default function FilterBar() {
     queryFn: () => api.getSeries(),
   })
 
-  const refreshSelectionHasTaggedBooks = useCallback(async () => {
-    if (!selectionMode || selectedBookIds.length === 0) {
-      setSelectionHasTaggedBooks(false)
-      return
-    }
-    try {
-      const allTags = await Promise.all(selectedBookIds.map(id => api.getBookTags(id)))
-      setSelectionHasTaggedBooks(allTags.some(tags => tags.length > 0))
-    } catch {
-      setSelectionHasTaggedBooks(false)
-    }
-  }, [selectionMode, selectedBookIds])
-
-  useEffect(() => {
-    refreshSelectionHasTaggedBooks()
-  }, [refreshSelectionHasTaggedBooks])
-
   const hasActiveFilters =
     filters.format !== '' || filters.tag !== '' || filters.series !== '' ||
     filters.sort !== 'author' || filters.order !== 'asc'
@@ -145,34 +127,6 @@ export default function FilterBar() {
       qc.invalidateQueries({ queryKey: ['books'] })
     } finally {
       setDeleting(false)
-    }
-  }
-
-  const handleBulkTag = async (tagName: string) => {
-    if (!tagName || selectedBookIds.length === 0) return
-    setTagging(true)
-    try {
-      await api.bulkAddTag(selectedBookIds, tagName)
-      setSelectionHasTaggedBooks(true)
-      qc.invalidateQueries({ queryKey: ['books'] })
-      qc.invalidateQueries({ queryKey: ['tags'] })
-    } finally {
-      setTagging(false)
-    }
-  }
-
-  const handleBulkClearTags = async () => {
-    if (selectedBookIds.length === 0) return
-    setClearingTags(true)
-    try {
-      const allTags = await Promise.all(selectedBookIds.map(id => api.getBookTags(id).catch(() => [])))
-      const uniqueTagNames = [...new Set(allTags.flat().map(t => t.name))]
-      await Promise.all(uniqueTagNames.map(tag => api.bulkRemoveTag(selectedBookIds, tag)))
-      qc.invalidateQueries({ queryKey: ['books'] })
-      qc.invalidateQueries({ queryKey: ['tags'] })
-      await refreshSelectionHasTaggedBooks()
-    } finally {
-      setClearingTags(false)
     }
   }
 
@@ -209,6 +163,9 @@ export default function FilterBar() {
     <div className="flex items-center justify-between gap-2 w-full">
       {/* Left: selection helpers */}
       <div className="flex items-center gap-1.5 flex-wrap">
+        <span className="text-xs font-semibold text-accent px-2 py-1 rounded bg-accent/10 border border-accent/20">
+          {selectedBookIds.length} selected
+        </span>
         <button type="button" onClick={() => selectAllBooks(visibleBookIds)} className={btnCls}>Select Page</button>
         <button type="button" onClick={handleSelectAllLibrary} className={btnCls}>Select All</button>
         <button type="button" onClick={clearSelection} className={btnCls}>Clear</button>
@@ -227,34 +184,16 @@ export default function FilterBar() {
             : 'Fetch Metadata'}
         </button>
 
-        {tags.length > 0 && (
-          <div className="relative w-32">
-            <select
-              defaultValue=""
-              onChange={e => { if (e.target.value) handleBulkTag(e.target.value); e.target.value = '' }}
-              disabled={selectedBookIds.length === 0 || tagging}
-              className={`${selectCls} w-full`}
-              aria-label="Assign tag to selected books"
-            >
-              <option value="">Tags</option>
-              {tags.map(t => (
-                <option key={t.id} value={t.name}>{t.name}</option>
-              ))}
-            </select>
-            <ChevronDown size={12} className="absolute right-2 top-1/2 -translate-y-1/2 text-ink-muted pointer-events-none" />
-          </div>
-        )}
-
-        {selectionHasTaggedBooks && (
-          <button
-            type="button"
-            onClick={handleBulkClearTags}
-            disabled={selectedBookIds.length === 0 || clearingTags}
-            className={`${btnCls} disabled:opacity-40 disabled:cursor-not-allowed`}
-          >
-            Clear Tags
-          </button>
-        )}
+        <button
+          type="button"
+          onClick={() => setManageTagsOpen(true)}
+          disabled={selectedBookIds.length === 0}
+          className={`${btnCls} flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed`}
+          title="Manage tags for selected books"
+        >
+          <TagIcon size={13} />
+          <span>Manage Tags</span>
+        </button>
 
         <button
           type="button"
@@ -404,6 +343,18 @@ export default function FilterBar() {
       >
         {viewMode === 'grid' ? <Grid2x2 size={15} /> : <List size={15} />}
       </button>
+
+      {/* Select mode button */}
+      <button
+        type="button"
+        onClick={() => setSelectionMode(true)}
+        aria-label="Select multiple books"
+        className="h-8 px-2.5 rounded border border-line bg-surface-raised text-ink-muted hover:text-ink hover:border-line-strong transition-colors flex items-center gap-1.5 text-xs font-medium focus-visible:outline-none focus:border-accent"
+        title="Select books"
+      >
+        <CheckSquare size={14} />
+        <span className="hidden sm:inline">Select</span>
+      </button>
     </div>
   )
 
@@ -458,6 +409,17 @@ export default function FilterBar() {
             >
               {viewMode === 'grid' ? <Grid2x2 size={14} /> : <List size={14} />}
             </button>
+
+            {/* Select trigger */}
+            <button
+              type="button"
+              onClick={() => setSelectionMode(true)}
+              className="flex items-center justify-center w-10 h-10 shrink-0 rounded border border-line bg-surface-raised text-ink-muted hover:border-line-strong hover:text-ink transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+              aria-label="Select multiple books"
+              title="Select books"
+            >
+              <CheckSquare size={14} />
+            </button>
           </>
         )}
       </div>
@@ -494,6 +456,13 @@ export default function FilterBar() {
           {viewControls}
         </div>
       )}
+
+      {/* Bulk Tag Dialog */}
+      <BulkTagDialog
+        open={manageTagsOpen}
+        onClose={() => setManageTagsOpen(false)}
+        selectedBookIds={selectedBookIds}
+      />
     </div>
   )
 }

@@ -25,7 +25,7 @@ def check_credentials(username: str, password: str, settings_model) -> bool:
 
     if not (stored_hash and stored_salt and stored_user):
         return False
-    if username != stored_user:
+    if username.strip().lower() != stored_user.strip().lower():
         return False
     computed = _hash_password(password, stored_salt)
     return hmac.compare_digest(computed, stored_hash)

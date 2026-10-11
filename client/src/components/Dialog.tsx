@@ -1,4 +1,5 @@
 import { useEffect, useRef, ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
 
 interface DialogProps {
@@ -38,15 +39,15 @@ export default function Dialog({ open, onClose, title, children, footer, wide = 
     }
   }, [open])
 
-  if (!open) return null
+  if (!open || typeof document === 'undefined') return null
 
   const handleScrimClick = (e: React.MouseEvent<HTMLDivElement>) => {
     if (e.target === e.currentTarget) onClose()
   }
 
-  return (
+  return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4"
+      className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center p-0 sm:p-4"
       onClick={handleScrimClick}
       aria-modal="true"
       role="dialog"
@@ -90,6 +91,7 @@ export default function Dialog({ open, onClose, title, children, footer, wide = 
           </div>
         )}
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }
